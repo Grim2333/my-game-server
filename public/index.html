@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Colyseus 多人同步测试页面</title>
+  <!-- Colyseus 客户端 SDK（@colyseus/sdk 0.18，与服务器端 0.18 + schema v5 匹配），全局变量为 Colyseus -->
+  <script src="https://unpkg.com/@colyseus/sdk@0.18.1/dist/colyseus.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 20px; }
+    #status { font-weight: bold; }
+    .btns button { margin-right: 8px; padding: 8px 16px; cursor: pointer; }
+    #players {
+      margin-top: 16px; padding: 12px; background: #f5f5f5;
+      border: 1px solid #ddd; border-radius: 6px;
+      font-family: Consolas, monospace; font-size: 13px;
+      white-space: pre-wrap; min-height: 60px;
+    }
+    #log {
+      margin-top: 8px; padding: 12px; background: #fffbe6;
+      border: 1px solid #e6d878; border-radius: 6px;
+      font-family: Consolas, monospace; font-size: 12px;
+      white-space: pre-wrap; min-height: 100px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Colyseus 多人同步测试</h1>
+  <p>连接状态：<span id="status">连接中...</span> ｜ 我的 sessionId：<span id="sessionId">-</span></p>
+
+  <div class="btns">
+    <button id="btn1" disabled>移动到 (10, 20)</button>
+    <button id="btn2" disabled>移动到 (50, 50)</button>
+  </div>
+
+  <div id="players">等待连接...</div>
+  <div id="log"></div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const sessionIdEl = document.getElementById("sessionId");
+    const playersEl = document.getElementById("players");
+    const logEl = document.getElementById("log");
+    const btn1 = document.getElementById("btn1");
+    const btn2 = document.getElementById("btn2");
+
+    let mySessionId = "";
+    let room = null;
+    // 上一帧的玩家快照，用于对比出 加入/离开/移动 事件
+    let prevPlayers = {};
+
+    function log(text) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent += `[${time}] ${text}\n`;
+    }
+
+    /** 渲染所有玩家坐标 */
+    function renderPlayers(state) {
+      const lines = ["--- 当前所有玩家坐标 ---"];
+      state.players.forEach((player, sessionId) => {
+        const me = sessionId === mySessionId ? " (我)" : "";
+        lines.push(`${sessionId}${me}: x=${player.x}, y=${player.y}`);
+      });
+      playersEl.textContent = lines.join("\n");
+    }
+
+    /**
+     * Schema v5 的客户端解码对象不再提供 onAdd/onRemove 回调，
+     * 因此通过 onStateChange + 与上一帧快照对比来检测变化。
+     */
+    function handleStateChange(state) {
+      // 状态尚未同步完成时（players 还没解码出来）直接跳过
+      if (!state || !state.players || typeof state.players.forEach !== "function") return;
+
+      const seen = {};
+      state.players.forEach((player, sessionId) => {
+        seen[sessionId] = { x: player.x, y: player.y };
+        const prev = prevPlayers[sessionId];
+        if (!prev) {
+          log(`[加入] ${sessionId}  坐标: (${player.x}, ${player.y})`);
+        } else if (prev.x !== player.x || prev.y !== player.y) {
+          log(`[移动] ${sessionId}: (${prev.x}, ${prev.y}) → (${player.x}, ${player.y})`);
+        }
+      });
+      for (const sessionId in prevPlayers) {
+        if (!seen[sessionId]) {
+          log(`[离开] ${sessionId}`);
+        }
+      }
+      prevPlayers = seen;
+      renderPlayers(state);
+    }
+
+    async function main() {
+      // 1. 连接到本地服务器并加入 my_room（本页面由后端托管，与服务器同源）
+      const client = new Colyseus.Client("ws://localhost:2567");
+      room = await client.joinOrCreate("my_room");
+
+      mySessionId = room.sessionId;
+      statusEl.textContent = "已连接 ✓";
+      statusEl.style.color = "green";
+      sessionIdEl.textContent = mySessionId;
+      btn1.disabled = false;
+      btn2.disabled = false;
+      log(`已加入房间 ${room.roomId}`);
+
+      // 2. 状态每次变化时，做 diff 并实时渲染
+      //    （首次触发即表示首帧状态已同步完成）
+      room.onStateChange(handleStateChange);
+
+      // 3. 两个按钮：发送 move 消息
+      btn1.onclick = () => room.send("move", { x: 10, y: 20 });
+      btn2.onclick = () => room.send("move", { x: 50, y: 50 });
+
+      room.onLeave((code) => {
+        statusEl.textContent = "已断开 (code " + code + ")";
+        statusEl.style.color = "red";
+        log("已离开房间，code=" + code);
+      });
+      room.onError((code, message) => log(`[错误] ${code}: ${message}`));
+    }
+
+    main().catch((e) => {
+      statusEl.textContent = "连接失败 ✗";
+      statusEl.style.color = "red";
+      log("连接失败: " + e.message);
+    });
+  </script>
+</body>
+</html>
