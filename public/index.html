@@ -1,131 +1,1514 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Colyseus 多人同步测试页面</title>
-  <!-- Colyseus 客户端 SDK（@colyseus/sdk 0.18，与服务器端 0.18 + schema v5 匹配），全局变量为 Colyseus -->
-  <script src="https://unpkg.com/@colyseus/sdk@0.18.1/dist/colyseus.js"></script>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
-    h1 { font-size: 20px; }
-    #status { font-weight: bold; }
-    .btns button { margin-right: 8px; padding: 8px 16px; cursor: pointer; }
-    #players {
-      margin-top: 16px; padding: 12px; background: #f5f5f5;
-      border: 1px solid #ddd; border-radius: 6px;
-      font-family: Consolas, monospace; font-size: 13px;
-      white-space: pre-wrap; min-height: 60px;
-    }
-    #log {
-      margin-top: 8px; padding: 12px; background: #fffbe6;
-      border: 1px solid #e6d878; border-radius: 6px;
-      font-family: Consolas, monospace; font-size: 12px;
-      white-space: pre-wrap; min-height: 100px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Colyseus 多人同步测试</h1>
-  <p>连接状态：<span id="status">连接中...</span> ｜ 我的 sessionId：<span id="sessionId">-</span></p>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>狼人杀 · 月圆之夜 | 手牌即生命</title>
+<script src="./vendor/colyseus.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/@colyseus/sdk@0.18.1/dist/colyseus.js';document.head.appendChild(s);"></script>
+<style>
+  /* ============================================================
+     暗黑主题 · 狼人杀悬疑氛围
+     ============================================================ */
+  :root {
+    --bg-0: #0a0714;
+    --bg-1: #140d24;
+    --panel: #1a1230;
+    --panel-2: #211741;
+    --edge: #322357;
+    --text: #e9e3f7;
+    --muted: #8f83ad;
+    --red: #ff3b4e;
+    --green: #2ecc71;
+    --gold: #f5c542;
+    --purple: #9b6bff;
+    --cyan: #4fd6e0;
+  }
+  /* 昼夜主题色（由 body.phase-night / body.phase-day 切换） */
+  body.phase-night {
+    --ph-1: #3a1d6e; --ph-2: #241046; --ph-3: #150a2b;
+    --ph-line: #8a5cd0; --ph-text: #d9c2ff;
+    --ph-panel: rgba(28, 14, 56, .62);
+  }
+  body.phase-day {
+    --ph-1: #2f6fc4; --ph-2: #1b4a8f; --ph-3: #0a1b3a;
+    --ph-line: #5b9bd5; --ph-text: #cfe4ff;
+    --ph-panel: rgba(10, 27, 58, .62);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background:
+      radial-gradient(ellipse 120% 70% at 50% -10%, #2a1a4e 0%, transparent 60%),
+      radial-gradient(ellipse 90% 60% at 50% 110%, #1c1038 0%, transparent 55%),
+      linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    background-attachment: fixed;
+    color: var(--text);
+    min-height: 100vh;
+    padding: 20px 14px 40px;
+  }
+  /* 背景月亮：夜晚可见，白天消失（无光晕） */
+  body::before {
+    content: ""; position: fixed; top: 6vh; right: 8vw; width: 130px; height: 130px;
+    border-radius: 50%; pointer-events: none; z-index: 0;
+    background: radial-gradient(circle at 38% 35%, #f5e9c9 0%, #d9c493 45%, #a98f5f 70%, #6e5c3c 100%);
+    opacity: .42; transition: opacity 1.1s ease;
+  }
+  /* 地面雾气（白天转为蓝色调） */
+  body::after {
+    content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: 34vh; pointer-events: none; z-index: 0;
+    background: linear-gradient(180deg, transparent, rgba(20, 13, 36, .85) 60%, rgba(10, 7, 20, .95));
+    transition: background 1.1s ease;
+  }
+  /* 地面雾气：夜晚紫黑 / 白天深蓝 */
+  body.phase-night::after {
+    background: linear-gradient(180deg, transparent, rgba(26, 13, 52, .9) 60%, rgba(14, 7, 30, .96));
+  }
+  body.phase-day::after {
+    background: linear-gradient(180deg, transparent, rgba(12, 32, 66, .9) 60%, rgba(6, 22, 48, .96));
+  }
+  #app { max-width: 980px; margin: 0 auto; position: relative; z-index: 1; }
 
-  <div class="btns">
-    <button id="btn1" disabled>移动到 (10, 20)</button>
-    <button id="btn2" disabled>移动到 (50, 50)</button>
+  /* ============================================================
+     昼夜背景：白天=蓝 / 夜晚=紫（两层叠加做交叉淡入淡出）
+     ============================================================ */
+  .bg-layer {
+    position: fixed; inset: 0; pointer-events: none; z-index: -1;
+    opacity: 0; transition: opacity 1.1s ease;
+  }
+  /* 夜晚：深紫（暗夜星空） */
+  #bg-night {
+    background:
+      radial-gradient(ellipse 130% 80% at 50% -10%, #4a2a8a 0%, transparent 62%),
+      radial-gradient(ellipse 100% 70% at 50% 110%, #251148 0%, transparent 58%),
+      linear-gradient(180deg, #1d0f3a, #0a0518);
+  }
+  /* 白天：亮蓝（破晓天幕）—— 与夜晚形成强对比 */
+  #bg-day {
+    background:
+      radial-gradient(ellipse 130% 80% at 50% -10%, #3d7fd4 0%, transparent 62%),
+      radial-gradient(ellipse 100% 70% at 50% 110%, #17457f 0%, transparent 58%),
+      linear-gradient(180deg, #123a70, #061630);
+  }
+  body.phase-night #bg-night { opacity: 1; }
+  body.phase-day #bg-day { opacity: 1; }
+  /* 白天：月亮完全隐藏 */
+  body.phase-day::before { opacity: 0; }
+  /* 顶部昼夜色条：切昼夜时的强提示 */
+  #phase-strip {
+    position: fixed; top: 0; left: 0; right: 0; height: 7px; z-index: 70;
+    background: var(--ph-line); transition: background 1.1s ease;
+  }
+  /* 超大昼夜水印图标：极低透明度，只做氛围提示不刺眼 */
+  .bg-icon {
+    position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 300px; line-height: 1; opacity: .07;
+    pointer-events: none; user-select: none;
+  }
+
+  /* ============================================================
+     标题
+     ============================================================ */
+  header { text-align: center; margin-bottom: 18px; }
+  header { opacity: .9; }
+  header h1 {
+    font-size: 22px; letter-spacing: 6px; font-weight: 800; color: #cfc6e0;
+  }
+  header .subtitle {
+    margin-top: 4px; font-size: 11px; letter-spacing: 3px; color: var(--muted);
+  }
+  header .subtitle b { color: var(--red); }
+
+  /* ============================================================
+     顶部横幅（阶段 / 回合 / 待结算 / 胜负）
+     ============================================================ */
+  #banner { display: flex; gap: 12px; margin-bottom: 12px; }
+  .banner-box {
+    flex: 1; text-align: center; padding: 13px 10px; border-radius: 12px;
+    font-size: 17px; font-weight: 800; letter-spacing: 2px;
+    background: var(--ph-panel); border: 1px solid var(--ph-line);
+    transition: background 1.1s ease, border-color 1.1s ease;
+  }
+  /* 阶段横幅：直接铺满昼夜主题色，昼夜一眼可辨（无光晕） */
+  #phase-banner {
+    color: var(--ph-text);
+    background: linear-gradient(180deg, var(--ph-2), var(--ph-3));
+    border: 2px solid var(--ph-line);
+    font-size: 20px; letter-spacing: 4px;
+  }
+  /* 倒计时 */
+  .countdown { color: var(--ph-text); font-variant-numeric: tabular-nums; }
+  .countdown.urgent {
+    color: #ffd2da; border-color: var(--red);
+    background: linear-gradient(180deg, #4a1b28, #2a1020);
+  }
+  /* 待结算提示（实色，无脉冲光晕） */
+  #pending-banner {
+    display: none; margin-bottom: 12px; padding: 14px; border-radius: 12px;
+    background: linear-gradient(180deg, #3a1622, #241029);
+    border: 1px solid var(--red); text-align: center;
+    font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #ffc2cb;
+  }
+  #pending-banner.show { display: block; }
+  #pending-banner .sub {
+    font-size: 13px; font-weight: 400; color: var(--muted);
+    margin-top: 6px; letter-spacing: 0;
+  }
+  /* ============================================================
+     「轮到你了」常驻横幅 —— 回合交替的主视觉
+     ============================================================ */
+  #turn-banner {
+    display: none; margin-bottom: 12px; padding: 16px; border-radius: 12px;
+    text-align: center; font-size: 20px; font-weight: 800; letter-spacing: 2px;
+  }
+  #turn-banner.show { display: block; }
+  #turn-banner .sub {
+    display: block; margin-top: 7px; font-size: 13px; font-weight: 400;
+    letter-spacing: 0; color: var(--muted);
+  }
+  #turn-banner.yours {
+    color: var(--ph-text); border: 2px solid var(--ph-line);
+    background: linear-gradient(180deg, var(--ph-2), var(--ph-3));
+  }
+  #turn-banner.yours .sub { opacity: .8; }
+  #turn-banner.wait {
+    color: var(--muted); border: 1px solid var(--edge);
+    background: rgba(10, 7, 20, .6);
+  }
+  #turn-banner.wait .dot { display: inline-block; animation: waitBlink 1.4s infinite; }
+  @keyframes waitBlink { 50% { opacity: .25; } }
+
+  /* 全屏「轮到你了」弹窗（纯遮罩，无全屏光晕） */
+  #turn-alert {
+    position: fixed; inset: 0; z-index: 90; display: none;
+    align-items: center; justify-content: center; pointer-events: none;
+  }
+  #turn-alert.show { display: flex; }
+  #turn-alert .ta-card {
+    padding: 28px 48px; border-radius: 16px; text-align: center;
+    background: linear-gradient(180deg, var(--ph-2), var(--ph-3));
+    border: 2px solid var(--ph-line);
+    animation: taPop .4s ease;
+  }
+  #turn-alert .ta-title {
+    font-size: 30px; font-weight: 800; letter-spacing: 4px; color: var(--ph-text);
+  }
+  #turn-alert .ta-sub { margin-top: 10px; font-size: 14px; letter-spacing: 1px; opacity: .8; }
+  @keyframes taPop {
+    0% { transform: scale(.72); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  #turn-alert.out { animation: taOut .35s ease forwards; }
+  @keyframes taOut { to { opacity: 0; transform: scale(1.06); } }
+
+  #winner-banner {
+    display: none; margin-bottom: 12px; padding: 18px; border-radius: 12px;
+    background: linear-gradient(180deg, #3d3210, #241029);
+    border: 1px solid var(--gold); text-align: center;
+    font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--gold);
+    animation: winnerPop .5s cubic-bezier(.2, 1.6, .4, 1);
+  }
+  #winner-banner.show { display: block; }
+  @keyframes winnerPop { from { transform: scale(.6); opacity: 0; } }
+
+  /* ============================================================
+     区域面板
+     ============================================================ */
+  .zone {
+    background: linear-gradient(180deg, var(--ph-panel), rgba(8, 6, 18, .88));
+    border: 1px solid var(--edge); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;
+    transition: background 1.1s ease;
+  }
+  .zone-title {
+    font-size: 14px; font-weight: 800; letter-spacing: 3px; color: var(--muted);
+    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .zone-title .tag { font-size: 11px; font-weight: 400; letter-spacing: 0; color: #6f6490; }
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; min-height: 46px; align-items: center; }
+  #my-play { min-height: 66px; justify-content: center; }
+
+  /* ============================================================
+     竖排卡牌
+     ============================================================ */
+  .card {
+    --edge-c: var(--edge);
+    width: 96px; height: 136px; border-radius: 12px; flex-shrink: 0;
+    background: linear-gradient(165deg, #2b2050 0%, #191130 55%, #120c26 100%);
+    border: 2px solid var(--edge-c);
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    padding: 10px 8px; cursor: default; user-select: none; position: relative;
+    transition: transform .18s ease, border-color .18s, filter .18s;
+  }
+  .card.wolf { --edge-c: #a8333f; }
+  .card.villager { --edge-c: #2a6b47; }
+  .card.god { --edge-c: #8a6a1c; }
+  .card .c-top { font-size: 24px; line-height: 1; }
+  .card .c-name { font-size: 17px; font-weight: 800; letter-spacing: 2px; }
+  .card.wolf .c-name { color: #ff9aa5; }
+  .card.villager .c-name { color: #96dfb2; }
+  .card.god .c-name { color: #f0d68f; }
+  /* 手牌编号（右下角徽标，方便沟通"我 3 号位"） */
+  .card .card-num {
+    position: absolute; right: -8px; bottom: -8px;
+    min-width: 22px; height: 22px; padding: 0 4px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; letter-spacing: 0;
+    background: #0d0918; border: 1px solid var(--edge-c); color: var(--text);
+  }
+  /* 野孩子变狼：左下角「狼」字，编号保持在右下角 */
+  .card .card-wolf {
+    position: absolute; left: -8px; bottom: -8px;
+    width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; letter-spacing: 0;
+    background: #0d0918; border: 1px solid #a8333f; color: #ff9aa5;
+  }
+  /* 丘比特连接标记：左上角「丘」字（只有连接发动方收得到该数据） */
+  .card .cupid-mark, .card-back .cupid-mark {
+    position: absolute; left: -8px; top: -8px;
+    width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; letter-spacing: 0;
+    background: #0d0918; border: 1px solid #b8569e; color: #f2a8de;
+    z-index: 2;
+  }
+  /* 狼美人魅惑标记：左上角爱心（只有魅惑发起方收得到该数据） */
+  .card .charm-mark, .card-back .charm-mark {
+    position: absolute; left: -8px; top: -8px;
+    width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; line-height: 1;
+    background: #0d0918; border: 1px solid #e0537a; color: #ff7aa2;
+    z-index: 2;
+  }
+  /* 狼刀杀害标记：左上角「杀」字（只有出刀方收得到该数据） */
+  .card .kill-mark, .card-back .kill-mark {
+    position: absolute; left: -8px; top: -8px;
+    width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 900; letter-spacing: 0;
+    background: #1a0608; border: 1px solid #c0202f; color: #ff4d5e;
+    z-index: 3;
+  }
+  /* 女巫毒杀标记：右上角「杀毒」二字（只有下毒的女巫收得到该数据） */
+  .card .poison-mark, .card-back .poison-mark {
+    position: absolute; right: -8px; top: -8px;
+    min-width: 24px; height: 22px; padding: 0 3px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 900; letter-spacing: 0;
+    background: #06160c; border: 1px solid #2fae6f; color: #5ef0a3;
+    z-index: 3;
+  }
+  /* 野孩子榜样标记：左下角「榜」字（只有野孩子使用者收得到该数据） */
+  .card .idol-mark, .card-back .idol-mark {
+    position: absolute; left: -8px; bottom: -8px;
+    width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; letter-spacing: 0;
+    background: #140d04; border: 1px solid #c98a3a; color: #f0c27a;
+    z-index: 2;
+  }
+  .card.mine { border-width: 3px; }
+
+  /* 可出牌：悬停轻微上浮（不加光晕） */
+  .card.playable { cursor: pointer; border-color: var(--gold); }
+  .card.playable:hover { transform: translateY(-8px); z-index: 5; }
+  /* 目标选择模式：实色描边 + 向上箭头指示，无脉冲发光 */
+  .card.selectable { cursor: pointer; border-color: var(--gold); border-style: dashed; }
+  .card.selectable:hover { transform: translateY(-8px); }
+  /* 置灰（昼夜限制 / 本回合已行动 / 不是当前行动方） */
+  .card.disabled { filter: grayscale(.95) brightness(.55); }
+  .card.disabled .c-name, .card.disabled .c-top { text-shadow: none; }
+
+
+  /* 本回合已行动过的牌：明确置灰 + 打上「已行动」角标 */
+  .card.acted { filter: grayscale(1) brightness(.5); opacity: .68; }
+  .card.acted .c-name, .card.acted .c-top { text-shadow: none; }
+  /* ★ 选目标模式下（守卫守护 / 丘比特连接等）：已行动过的牌也要恢复彩色，否则看不出它能被选中 */
+  .card.acted.selectable, .card.disabled.selectable { filter: none; opacity: 1; }
+  .acted-tag {
+    position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+    padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+    font-size: 10px; font-weight: 800; letter-spacing: 1px;
+    color: #cfc6e0; background: rgba(10, 7, 20, .92);
+    border: 1px solid rgba(255, 255, 255, .18);
+  }
+
+  /* 战场上的牌略小 */
+  #my-play .card { width: 86px; height: 122px; }
+  #my-play .card.selectable { border-color: var(--gold); border-style: dashed; }
+  #my-play .card:hover { transform: scale(1.02); }
+  /* 技能还没发动：行动区的牌可以点一下取消本次发动 */
+  #my-play .card.cancellable { cursor: pointer; }
+  /* 墓地牌更小更暗 */
+  #graveyard .card { width: 66px; height: 94px; opacity: .72; filter: brightness(.8); }
+  #graveyard .card.selectable { opacity: 1; filter: none; }
+
+  /* 入场动画只做位移/缩放，不发光 */
+  .card.pop-in { animation: popIn .3s ease; }
+  @keyframes popIn {
+    0% { transform: scale(.72) translateY(14px); opacity: 0; }
+    100% { transform: none; opacity: 1; }
+  }
+  #graveyard .card.pop-in { animation: graveIn .35s ease; }
+  @keyframes graveIn {
+    0% { transform: translateY(-14px); opacity: 0; }
+    100% { transform: none; opacity: .72; }
+  }
+
+  /* 技能结算完毕 → 回到手牌：轻微上浮提示未被消耗 */
+  .card.card-return { animation: cardReturn .5s ease; }
+  @keyframes cardReturn {
+    0% { transform: translateY(-14px) scale(1.06); }
+    100% { transform: none; }
+  }
+
+  /* 对方手牌背面（纯色，无光晕） */
+  .card-back {
+    position: relative;
+    width: 62px; height: 90px; border-radius: 10px; flex-shrink: 0;
+    background:
+      repeating-linear-gradient(45deg, rgba(155, 107, 255, .08) 0 6px, transparent 6px 12px),
+      linear-gradient(165deg, #2b2050, #120c26);
+    border: 1px solid #4a3580;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; color: rgba(155, 107, 255, .45); user-select: none;
+    transition: transform .18s ease, border-color .18s;
+  }
+  /* 目标选择模式：金色虚线描边 + 轻微上浮，无脉冲发光 */
+  .card-back.selectable { cursor: pointer; border: 2px dashed var(--gold); }
+  .card-back.selectable:hover { transform: translateY(-8px); }
+  /* 背面牌编号：狼刀/开枪/毒人时按位置沟通（"杀 3 号"） */
+  .card-back .back-num {
+    font-size: 22px; font-weight: 800; color: rgba(200, 180, 255, .85);
+  }
+  .card-back.selectable .back-num { color: var(--gold); }
+
+  /* 对方手牌区里的明牌：与背面牌同尺寸 */
+  #opp-hand .card {
+    width: 62px; height: 90px; border-radius: 10px; padding: 4px 4px;
+  }
+  #opp-hand .card .c-top { font-size: 16px; }
+  #opp-hand .card .c-name { font-size: 11px; letter-spacing: 1px; }
+
+  /* 飞行的牌（点击出牌/选目标时的动画） */
+  .ghost-card {
+    position: fixed; z-index: 100; border-radius: 12px; pointer-events: none;
+    background: linear-gradient(165deg, #2b2050, #120c26);
+    border: 2px solid var(--edge);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; letter-spacing: 2px; color: var(--text);
+    transition: transform .5s cubic-bezier(.3, .7, .3, 1), opacity .5s;
+  }
+
+  .empty { color: #565072; font-size: 13px; font-style: italic; letter-spacing: 1px; }
+  .info-line { font-size: 12px; color: var(--muted); margin-top: 8px; letter-spacing: 1px; }
+
+  /* ============================================================
+     操作按钮
+     ============================================================ */
+  #action-bar { text-align: center; margin: 4px 0 16px; }
+  .btn {
+    padding: 12px 26px; border: none; border-radius: 10px; font-size: 15px; font-weight: 800;
+    letter-spacing: 2px; cursor: pointer; transition: all .2s; margin: 0 6px;
+    border: 1px solid transparent;
+  }
+  .btn:disabled { opacity: .3; cursor: not-allowed; }
+  .btn-primary { background: #8f1620; color: #fff; }
+  .btn-primary:not(:disabled):hover { background: #b01d2a; }
+  .btn-witch { background: #4c2b85; color: #f0e6ff; }
+  .btn-witch:not(:disabled):hover { background: #6136a6; }
+  .btn-skip { background: #3a3355; color: #cfc6e8; border-color: var(--edge); }
+  .btn-skip:hover { background: #4a4370; }
+  .btn-exile { background: #7d2018; color: #fff; }
+  .btn-exile:not(:disabled):hover { background: #9c2a20; }
+
+  /* ============================================================
+     女巫模态框
+     ============================================================ */
+  #modal-mask {
+    display: none; position: fixed; inset: 0; background: rgba(5, 3, 12, .82); z-index: 80;
+    align-items: center; justify-content: center; backdrop-filter: blur(3px);
+  }
+  #modal-mask.show { display: flex; animation: fadeIn .25s; }
+  @keyframes fadeIn { from { opacity: 0; } }
+  #modal {
+    background: linear-gradient(180deg, #241a44, #150e2c);
+    border: 2px solid var(--purple); border-radius: 16px; padding: 28px; width: 340px;
+    text-align: center;
+    animation: winnerPop .35s cubic-bezier(.2, 1.6, .4, 1);
+  }
+  #modal h3 { color: #d9c2ff; margin-bottom: 8px; letter-spacing: 3px; }
+  #modal .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+  #modal .btn { display: block; width: 100%; margin: 10px 0; }
+
+  /* ============================================================
+     日志（可折叠）
+     ============================================================ */
+  #log-panel {
+    background: rgba(10, 7, 20, .85); border: 1px solid var(--edge); border-radius: 12px;
+    padding: 10px 14px;
+  }
+  #log-panel summary {
+    cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: 2px;
+    color: var(--muted); outline: none; user-select: none;
+  }
+  #log-panel summary:hover { color: var(--text); }
+  #log { height: 150px; overflow-y: auto; font-size: 12px; font-family: Consolas, "Courier New", monospace; margin-top: 8px; }
+  #log div { padding: 2px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); color: #b7aad4; }
+  #log div:last-child { color: var(--text); }
+</style>
+</head>
+<body class="phase-night">
+<!-- 昼夜背景层：夜晚绿 / 白天蓝 -->
+<div class="bg-layer" id="bg-night"><div class="bg-icon">🌙</div></div>
+<div class="bg-layer" id="bg-day"><div class="bg-icon">☀️</div></div>
+<div id="phase-strip"></div>
+<div id="app">
+  <header>
+    <h1><span class="moon-ico">🌙</span> 狼人杀 · 月圆之夜</h1>
+  </header>
+
+  <!-- 顶部横幅：阶段 + 倒计时 -->
+  <div id="banner">
+    <div id="phase-banner" class="banner-box">🌙 黑夜</div>
+    <div id="countdown" class="banner-box countdown">⏱ --</div>
+  </div>
+  <div id="turn-banner"></div>
+  <div id="pending-banner"></div>
+  <div id="winner-banner"></div>
+
+  <!-- 对方手牌（仅背面与数量） -->
+  <div class="zone">
+    <div class="zone-title">😈 对方手牌</div>
+    <div class="cards" id="opp-hand"></div>
   </div>
 
-  <div id="players">等待连接...</div>
-  <div id="log"></div>
+  <!-- 行动区（双方共用：自己的牌正面可见，对方的牌白天公开身份、其它时候只显示背面） -->
+  <div class="zone">
+    <div class="zone-title">🎬 行动区</div>
+    <div class="cards" id="my-play"></div>
+  </div>
 
-  <script>
-    const statusEl = document.getElementById("status");
-    const sessionIdEl = document.getElementById("sessionId");
-    const playersEl = document.getElementById("players");
-    const logEl = document.getElementById("log");
-    const btn1 = document.getElementById("btn1");
-    const btn2 = document.getElementById("btn2");
+  <!-- 我的手牌 -->
+  <div class="zone">
+    <div class="zone-title">🃏 我的手牌 <span class="tag" id="my-hand-info"></span></div>
+    <div class="cards" id="my-hand"></div>
+  </div>
 
-    let mySessionId = "";
-    let room = null;
-    // 上一帧的玩家快照，用于对比出 加入/离开/移动 事件
-    let prevPlayers = {};
+  <!-- 操作栏 -->
+  <div id="action-bar">
+    <button id="btn-ready" class="btn btn-primary" disabled>✅ 结束回合 / 跳过</button>
+    <button id="btn-exile" class="btn btn-exile" style="display:none">⚖️ 流放</button>
+    <button id="btn-skip" class="btn btn-skip" style="display:none">跳过此技能</button>
+  </div>
 
-    function log(text) {
-      const time = new Date().toLocaleTimeString();
-      logEl.textContent += `[${time}] ${text}\n`;
-    }
+  <!-- 墓地 -->
+  <div class="zone">
+    <div class="zone-title">🪦 墓地</div>
+    <div class="cards" id="graveyard"></div>
+  </div>
 
-    /** 渲染所有玩家坐标 */
-    function renderPlayers(state) {
-      const lines = ["--- 当前所有玩家坐标 ---"];
-      state.players.forEach((player, sessionId) => {
-        const me = sessionId === mySessionId ? " (我)" : "";
-        lines.push(`${sessionId}${me}: x=${player.x}, y=${player.y}`);
-      });
-      playersEl.textContent = lines.join("\n");
-    }
+  <!-- 日志（默认折叠，避免信息过载） -->
+  <details id="log-panel">
+    <summary>📜 事件日志</summary>
+    <div id="log"></div>
+  </details>
+</div>
 
-    /**
-     * Schema v5 的客户端解码对象不再提供 onAdd/onRemove 回调，
-     * 因此通过 onStateChange + 与上一帧快照对比来检测变化。
-     */
-    function handleStateChange(state) {
-      // 状态尚未同步完成时（players 还没解码出来）直接跳过
-      if (!state || !state.players || typeof state.players.forEach !== "function") return;
+<!-- 轮到你了：全屏弹窗提示 -->
+<div id="turn-alert">
+  <div class="ta-card">
+    <div class="ta-title">👉 本方回合</div>
+    <div class="ta-sub"></div>
+  </div>
+</div>
 
-      const seen = {};
-      state.players.forEach((player, sessionId) => {
-        seen[sessionId] = { x: player.x, y: player.y };
-        const prev = prevPlayers[sessionId];
-        if (!prev) {
-          log(`[加入] ${sessionId}  坐标: (${player.x}, ${player.y})`);
-        } else if (prev.x !== player.x || prev.y !== player.y) {
-          log(`[移动] ${sessionId}: (${prev.x}, ${prev.y}) → (${player.x}, ${player.y})`);
-        }
-      });
-      for (const sessionId in prevPlayers) {
-        if (!seen[sessionId]) {
-          log(`[离开] ${sessionId}`);
-        }
+<!-- 女巫技能模态框 -->
+<div id="modal-mask">
+  <div id="modal">
+    <h3 id="modal-title">女巫的药剂</h3>
+    <div class="modal-sub" id="modal-sub">今夜，你要用哪一瓶？</div>
+    <button class="btn btn-witch" id="modal-save">💊 解药 — 从自己墓地复活一张牌回手牌</button>
+    <button class="btn btn-witch" id="modal-poison">☠️ 毒药 — 锁定对方一张手牌</button>
+    <button class="btn btn-skip" id="modal-cancel">取消</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  连接：协议 / 域名 / 端口全部跟随【当前页面地址】动态拼接
+//  本地 http://localhost:2567 → ws://localhost:2567
+//  内网穿透 https://frp-net.com:24702 → wss://frp-net.com:24702
+//  （https 页面必须用 wss，否则被浏览器混合内容拦截）
+// ============================================================
+const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+const host = window.location.host; // 自带端口；443/80 默认端口时自动省略
+const client = new Colyseus.Client(`${protocol}${host}`);
+
+let room = null;
+let mySessionId = "";
+let prevSnapshot = null;
+/** 这些待结算状态下「技能还没发动」→ 点行动区里那张牌可以取消本次发动（与服务器一致） */
+const CANCELABLE_PENDING = new Set([
+  "thiefSwap", "seerCheck", "guardPick", "merchantBless", "wildChildIdol",
+  "necromancer", "cupidLink1", "cupidLink2", "wolfKnife",
+  "wolfBeautyChoice", "wolfBeautyCharm", "whiteWolfBlast", "knightDuel",
+]);
+/** 上一帧"是否轮到我行动"——用于检测下降沿，回合离开我时清掉弹窗 */
+let prevMyTurnActive = false;
+/** 上一帧的回合归属——只在【回合真正换到我】时弹「本方回合」，自己回合内多次行动不重复弹 */
+let prevTurnOwner = "";
+let witchCardId = "";
+/** 当前可操作的女巫牌：解药 / 毒药是否已用过（每种终身一瓶） */
+let witchCardReviveUsed = false;
+let witchCardPoisonUsed = false;
+/** 当前可操作的女巫牌：奇迹商人给的"任意一瓶药"剩余层数 */
+let witchCardBless = 0;
+/** 奇迹商人强化女巫时补的是哪一瓶（"" | "revive" | "poison"） */
+let witchCardBlessPotion = "";
+let phaseEndsAt = 0;   // 本回合结束的本地时间戳（由 turnStart 消息校准）
+
+const $ = (id) => document.getElementById(id);
+const log = (msg) => {
+  const div = document.createElement("div");
+  div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  const logEl = $("log");
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+};
+
+const CARD_ICON = { wolf: "🐺", villager: "👤", god: "✨" };
+/** 选择对方手牌时的动作名（狼刀 / 开枪 / 带人 / 毒人） */
+const TARGET_ACTION = {
+  wolfKnife: "🐺 狼刀杀死",
+  hunter: "🔫 开枪带走",
+  wolfKing: "👑 狼王带走",
+  witchPoison: "☠️ 毒死",
+  thiefSwap: "🔀 盗贼交换",
+  seerCheck: "🔍 查验",
+  whiteWolfBlast: "💥 自爆带走",
+  knightDuel: "⚔️ 决斗",
+  cupidLink1: "💘 连接",
+  cupidLink2: "💘 连接",
+  necromancer: "🕯️ 通灵",
+  merchantBless: "✨ 强化",
+  guardPick: "🛡️ 守护",
+  wildChildIdol: "🎯 定榜样",
+  wolfBeautyCharm: "💋 魅惑",
+};
+
+/** 查验 / 决斗结果等一次性信息：复用顶部横幅短暂显示几秒，看完即消失 */
+let toastText = "";
+let toastTimer = null;
+function showToast(text) {
+  toastText = text;
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastText = "";
+    if (room && room.state) render(room.state);
+  }, 4000);
+  if (room && room.state) render(room.state);
+}
+
+// ============================================================
+//  「轮到你了」醒目提示（回合交替）
+// ============================================================
+const BASE_TITLE = document.title;
+let turnAlertTimers = [];
+let titleFlashTimer = null;
+
+/** 全屏弹窗 + 标题栏闪烁：即使切到别的标签页也能看到 */
+function showTurnAlert(phase) {
+  const el = $("turn-alert");
+  const card = el.querySelector(".ta-card");
+
+  el.querySelector(".ta-sub").textContent = "";
+  el.classList.remove("out");
+  el.classList.add("show");
+  card.style.animation = "none";
+  void card.offsetWidth;          // 重置入场动画
+  card.style.animation = "";
+
+  flashTitle("👉 本方回合！");
+
+  turnAlertTimers.forEach((t) => window.clearTimeout(t));
+  turnAlertTimers = [
+    window.setTimeout(() => {
+      el.classList.add("out");
+      turnAlertTimers.push(window.setTimeout(() => el.classList.remove("show", "out"), 450));
+    }, 2600),
+  ];
+}
+
+/** 标签页标题闪烁（后台标签页也能注意到） */
+function flashTitle(text) {
+  window.clearInterval(titleFlashTimer);
+  let on = true;
+  titleFlashTimer = window.setInterval(() => {
+    document.title = on ? text : BASE_TITLE;
+    on = !on;
+  }, 800);
+  window.setTimeout(() => {
+    window.clearInterval(titleFlashTimer);
+    document.title = BASE_TITLE;
+  }, 7000);
+}
+
+function clearTurnAlert() {
+  turnAlertTimers.forEach((t) => window.clearTimeout(t));
+  turnAlertTimers = [];
+  $("turn-alert").classList.remove("show", "out");
+  window.clearInterval(titleFlashTimer);
+  document.title = BASE_TITLE;
+}
+
+// ============================================================
+//  工具：存活牌数（生命值 = 手牌 + 战场上自己的牌）
+// ============================================================
+function otherId(state) {
+  for (const sid of state.players.keys()) {
+    if (sid !== mySessionId) return sid;
+  }
+  return null;
+}
+
+function aliveCount(state, sid) {
+  const p = state.players.get(sid);
+  if (!p) return 0;
+  // 生命 = 手牌 + 行动区（playCount 是公开字段，所以对方也能算出来）
+  return p.handCount + (p.playCount || 0);
+}
+
+// ============================================================
+//  FLIP 渲染：已存在的牌平滑滑到新位置，新牌 pop-in 入场
+// ============================================================
+function flipRender(container, buildFn) {
+  const oldPos = new Map();
+  container.querySelectorAll("[data-id]").forEach((el) => {
+    oldPos.set(el.dataset.id, el.getBoundingClientRect());
+  });
+  container.innerHTML = "";
+  buildFn();
+  container.querySelectorAll("[data-id]").forEach((el) => {
+    const id = el.dataset.id;
+    if (oldPos.has(id)) {
+      const first = oldPos.get(id);
+      const last = el.getBoundingClientRect();
+      const dx = first.left - last.left;
+      const dy = first.top - last.top;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        el.style.transition = "none";
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+        requestAnimationFrame(() => {
+          el.style.transition = "transform .3s ease";
+          el.style.transform = "";
+        });
       }
-      prevPlayers = seen;
-      renderPlayers(state);
+    } else {
+      el.classList.add("pop-in");
     }
+  });
+}
 
-    async function main() {
-      // 1. 连接到本地服务器并加入 my_room（本页面由后端托管，与服务器同源）
-      const client = new Colyseus.Client("ws://localhost:2567");
-      room = await client.joinOrCreate("my_room");
+// ============================================================
+//  飞牌动画：点击出牌/选目标时，一张"幽灵牌"飞向目标区域
+// ============================================================
+function flyCard(fromEl, color, label, targetSelector) {
+  const rect = fromEl.getBoundingClientRect();
+  const zone = $(targetSelector).getBoundingClientRect();
+  const ghost = document.createElement("div");
+  ghost.className = "ghost-card";
+  ghost.textContent = label;
+  ghost.style.borderColor = color;
+  ghost.style.color = color;
+  ghost.style.left = rect.left + "px";
+  ghost.style.top = rect.top + "px";
+  ghost.style.width = rect.width + "px";
+  ghost.style.height = rect.height + "px";
+  document.body.appendChild(ghost);
 
-      mySessionId = room.sessionId;
-      statusEl.textContent = "已连接 ✓";
-      statusEl.style.color = "green";
-      sessionIdEl.textContent = mySessionId;
-      btn1.disabled = false;
-      btn2.disabled = false;
-      log(`已加入房间 ${room.roomId}`);
-
-      // 2. 状态每次变化时，做 diff 并实时渲染
-      //    （首次触发即表示首帧状态已同步完成）
-      room.onStateChange(handleStateChange);
-
-      // 3. 两个按钮：发送 move 消息
-      btn1.onclick = () => room.send("move", { x: 10, y: 20 });
-      btn2.onclick = () => room.send("move", { x: 50, y: 50 });
-
-      room.onLeave((code) => {
-        statusEl.textContent = "已断开 (code " + code + ")";
-        statusEl.style.color = "red";
-        log("已离开房间，code=" + code);
-      });
-      room.onError((code, message) => log(`[错误] ${code}: ${message}`));
-    }
-
-    main().catch((e) => {
-      statusEl.textContent = "连接失败 ✗";
-      statusEl.style.color = "red";
-      log("连接失败: " + e.message);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const dx = zone.left + zone.width / 2 - (rect.left + rect.width / 2);
+      const dy = zone.top + zone.height / 2 - (rect.top + rect.height / 2);
+      ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.55) rotate(12deg)`;
+      ghost.style.opacity = "0";
     });
-  </script>
+  });
+  setTimeout(() => ghost.remove(), 620);
+}
+
+// ============================================================
+//  状态快照 & diff（无变化不重绘 + 事件日志）
+// ============================================================
+function snapshot(state) {
+  const me = state.players && state.players.get(mySessionId);
+  const oppId = otherId(state);
+  const opp = oppId && state.players ? state.players.get(oppId) : null;
+  return {
+    phase: state.phase,
+    round: state.round,
+    winner: state.winner,
+    pendingType: state.pendingAction ? state.pendingAction.type : "",
+    pendingActor: state.pendingAction ? state.pendingAction.actor : "",
+    playerCount: state.players.size,
+    myHand: me && me.hand ? me.hand.map((c) => c.id).join(",") : "",
+    myPlay: me && me.play ? me.play.map((c) => c.id).join(",") : "",
+    oppHandCount: opp ? opp.handCount : 0,
+    oppPlayCount: opp ? opp.playCount : 0,
+    turnOwner: state.turnOwner,
+    turnSeq: state.turnSeq,
+    firstPlayer: state.firstPlayer,
+    grave: me && me.graveyard ? me.graveyard.map((c) => c.id).join(",") : "",
+  };
+}
+
+function diffAndLog(prev, snap, state) {
+  if (!prev) { log("🎮 游戏开始，发牌完成"); return; }
+  if (prev.phase !== snap.phase) {
+    log(snap.phase === "night" ? "🌙 进入黑夜" : "☀️ 进入白天");
+  }
+  if (prev.playerCount !== snap.playerCount) {
+    log(`👥 房间人数：${prev.playerCount} → ${snap.playerCount} / 2`);
+  }
+  if (prev.round !== snap.round && snap.round > 0) {
+    log(snap.phase === "night" ? `🌙 第 ${snap.round} 夜降临` : `☀️ 天亮了（第 ${snap.round} 轮）`);
+  }
+  if (prev.turnOwner !== snap.turnOwner && snap.turnOwner) {
+    const role = snap.turnOwner === mySessionId ? "你" : "对方";
+    const seqName = ["P1 黑夜", "P2 黑夜", "P1 白天", "P2 白天"][snap.turnSeq] || "";
+    log(`🔄 轮到 ${role} 行动（${seqName}）`);
+  }
+  if (prev.myHand !== snap.myHand) {
+    const oldIds = prev.myHand ? prev.myHand.split(",") : [];
+    const newIds = snap.myHand ? snap.myHand.split(",") : [];
+    newIds.filter((id) => !oldIds.includes(id)).forEach((id) => {
+      const card = state.players.get(mySessionId).hand.find((c) => c.id === id);
+      if (card) log(`🃏 获得手牌：${card.name}`);
+    });
+  }
+  if (prev.oppHandCount !== snap.oppHandCount) {
+    log(`😈 对方手牌数量变化：${prev.oppHandCount} → ${snap.oppHandCount}`);
+  }
+  if (prev.myPlay !== snap.myPlay) {
+    const oldIds = prev.myPlay ? prev.myPlay.split(",") : [];
+    const newIds = snap.myPlay ? snap.myPlay.split(",") : [];
+    newIds.filter((id) => !oldIds.includes(id)).forEach((id) => {
+      const card = state.players.get(mySessionId).play.find((c) => c.id === id);
+      if (card) log(`🎬 你的 ${card.name} 外出执行任务…`);
+    });
+    // 技能结算完毕 → 牌回到手牌（可再次使用）
+    oldIds.filter((id) => !newIds.includes(id)).forEach((id) => {
+      const card = state.players.get(mySessionId).hand.find((c) => c.id === id);
+      if (card) log(`↩️ ${card.name} 任务完成，回到你的手牌（可再次打出）`);
+    });
+  }
+  if (prev.oppPlayCount !== snap.oppPlayCount) {
+    const oppP = otherId(state) ? state.players.get(otherId(state)) : null;
+    const rv = oppP ? oppP.revealedName : "";
+    log(
+      rv
+        ? `🎬 对方打出「${rv}」`
+        : `🎬 对方在行动区放了 ${snap.oppPlayCount} 张牌（内容不可见）`
+    );
+  }
+  if (prev.grave !== snap.grave) {
+    const oldIds = prev.grave ? prev.grave.split(",") : [];
+    const newIds = snap.grave ? snap.grave.split(",") : [];
+    const myGraveNow = state.players.get(mySessionId)?.graveyard;
+    newIds.filter((id) => !oldIds.includes(id)).forEach((id) => {
+      const card = myGraveNow ? myGraveNow.find((c) => c.id === id) : undefined;
+      if (card) log(`🪦 你的 ${card.name} 进入墓地`);
+    });
+    // 墓地牌变少 = 被女巫解药复活回手牌
+    oldIds.filter((id) => id && !newIds.includes(id)).forEach((id) => {
+      log(`💊 ${id} 被复活，离开墓地回到手牌`);
+    });
+  }
+  if (prev.pendingType !== snap.pendingType) {
+    if (snap.pendingType === "") log("✅ 结算完成");
+    else if (snap.pendingActor === mySessionId) log("⚡ " + state.pendingAction.description);
+    else log("⏳ 等待对方完成结算…");
+  }
+  if (prev.winner !== snap.winner && snap.winner !== "") {
+    log(snap.winner === mySessionId ? "🏆 你赢了！" : "💀 你输了…");
+  }
+}
+
+// ============================================================
+//  渲染
+// ============================================================
+function cardEl(card, opts = {}) {
+  const div = document.createElement("div");
+  // ★ 野孩子变狼后：卡面（图标 / 名称 / 配色）保持野孩子原样，只在右下角加一个「狼」字
+  const faceType = card.turnedWolf ? "villager" : card.type;
+  div.className = `card ${faceType}`;
+  if (card.turnedWolf) div.classList.add("turned-wolf");
+  if (card.owner && card.owner === mySessionId) div.classList.add("mine");
+  if (opts.disabled) div.classList.add("disabled");
+  if (opts.selectable) div.classList.add("selectable");
+  div.dataset.id = card.id;
+  for (const [k, v] of Object.entries(opts.dataset || {})) div.dataset[k] = v;
+
+  const numTag = opts.num ? `<span class="card-num">${opts.num}</span>` : "";
+  const wolfTag = card.turnedWolf ? `<span class="card-wolf">狼</span>` : "";
+  const linkTag = opts.linkMark ? `<span class="cupid-mark">丘</span>` : "";
+  const idolTag = opts.idolMark ? `<span class="idol-mark">榜</span>` : "";
+  // 卡面只保留 图标 + 名称，不再显示类型小字 / 重复名称的技能标签 / 归属徽标
+  div.innerHTML =
+    `${numTag}${wolfTag}${linkTag}${idolTag}<span class="c-top">${CARD_ICON[faceType] || "❖"}</span>` +
+    `<span class="c-name">${card.name}</span>`;
+  return div;
+}
+
+function render(state) {
+  const pa = state.pendingAction || { type: "", actor: "", zone: "" };
+  const targeting = pa.type !== "" && pa.actor === mySessionId;
+  const night = state.phase === "night";
+  const me = state.players.get(mySessionId);
+  const oppId = otherId(state);
+
+  const gameActive = state.winner === "" && state.round > 0;
+  // 我此刻能否行动：游戏进行中 + 轮到我 + 我还没结束本回合 + 没有待结算
+  const canAct = gameActive && state.turnOwner === mySessionId && !state.turnActed && pa.type === "";
+  const iAmTurn = state.turnOwner === mySessionId;
+
+  // ---------- 顶部横幅：阶段（昼夜主视觉） ----------
+  const phaseBanner = $("phase-banner");
+  phaseBanner.textContent = night ? `🌙 第 ${state.round} 夜` : `☀️ 白天 · 第 ${state.round} 轮`;
+
+  // ---------- 昼夜背景：夜晚绿 / 白天蓝（平滑交叉淡入） ----------
+  document.body.classList.toggle("phase-night", night);
+  document.body.classList.toggle("phase-day", !night);
+
+  // ---------- 未开局：明确显示等待对手 ----------
+  if (!gameActive && state.winner === "") {
+    // 显示房间号：两个页面必须显示【同一个房间号】才会开局
+    const roomTag = room ? String(room.roomId).slice(0, 8) : "-";
+    $("turn-banner").classList.add("show", "wait");
+    $("turn-banner").innerHTML =
+      `⏳ 等待对手加入…（房间 ${state.players.size}/2 人）` +
+      `<span class="sub">🔑 房间号 <b>${roomTag}</b> · 两个页面需一致</span>`;
+    $("btn-ready").disabled = true;
+    $("btn-exile").style.display = "none";
+    $("btn-skip").style.display = "none";
+    $("pending-banner").classList.remove("show");
+    return;
+  }
+
+  // ---------- 游戏中不显示状态横幅（节省画面空间）----------
+  // 回合归属由 手牌彩色/灰色 + 换回合弹窗 表达；选目标/结算提示由 pending-banner 承担。
+  $("turn-banner").classList.remove("show", "yours", "wait");
+
+  // 狼美人：进行动区后二选一（杀人 / 魅惑）
+  if (pa.type === "wolfBeautyChoice" && targeting && !$("modal-mask").classList.contains("show")) {
+    const oppHandCount = oppId && state.players.get(oppId) ? state.players.get(oppId).handCount : 0;
+    const playedBeauty = me && me.play ? me.play.find((c) => c.skill === "wolfBeauty") : null;
+    $("modal-title").textContent = "狼美人";
+    $("modal-sub").textContent = "今夜，你要用哪一个？";
+    $("modal-save").textContent = "杀人";
+    $("modal-poison").textContent = "魅惑";
+    $("modal-save").disabled = state.wolfKnifeUsed === true;
+    $("modal-poison").disabled =
+      oppHandCount === 0 || !!(playedBeauty && playedBeauty.charmUsedTonight);
+    $("modal-cancel").style.display = "";
+    $("modal-mask").classList.add("show");
+  }
+
+  // 奇迹商人强化女巫：当场二选一（多一瓶解药 / 多一瓶毒药）
+  if (pa.type === "witchBless" && targeting && !$("modal-mask").classList.contains("show")) {
+    $("modal-title").textContent = "奇迹商人";
+    $("modal-sub").textContent = "强化女巫：多补哪一瓶？";
+    $("modal-save").textContent = "💊 多一瓶解药";
+    $("modal-poison").textContent = "☠️ 多一瓶毒药";
+    $("modal-save").disabled = false;
+    $("modal-poison").disabled = false;
+    $("modal-cancel").style.display = "none";
+    $("modal-mask").classList.add("show");
+  }
+
+  const pendingBanner = $("pending-banner");
+  if (pa.type !== "") {
+    pendingBanner.classList.add("show");
+    if (targeting) {
+      pendingBanner.innerHTML = `${pa.description}`;
+    } else {
+      // ★ 非行动方一律只显示中性提示：不透露对方用了哪张牌 / 什么技能，也不透露任何死亡结算时机。
+      pendingBanner.innerHTML = `⏳ 对方正在行动…`;
+    }
+  } else if (toastText) {
+    pendingBanner.classList.add("show");
+    pendingBanner.innerHTML = toastText;
+  } else {
+    pendingBanner.classList.remove("show");
+  }
+
+  const winnerBanner = $("winner-banner");
+  if (state.winner !== "") {
+    winnerBanner.classList.add("show");
+    winnerBanner.textContent = state.winner === mySessionId
+      ? "🏆 恭喜！你获得了胜利！" : "💀 很遗憾，你输了…";
+  } else {
+    winnerBanner.classList.remove("show");
+  }
+
+  // ---------- 对方手牌：背面 + 编号 + 数量 ----------
+  const oppHand = $("opp-hand");
+  const oppCount = state.players.get(oppId) ? state.players.get(oppId).handCount : 0;
+  // 对方永久明牌的手牌（天使重生过的）：按 slot 显示正面，位置仍可点选
+  const oppOpen = {};
+  const oppP = state.players.get(oppId);
+  if (oppP && oppP.openCards) {
+    oppP.openCards.forEach((oc) => { oppOpen[oc.slot] = oc; });
+  }
+  flipRender(oppHand, () => {
+    // 丘比特「丘」标记 + 狼美人爱心标记 + 狼刀「杀」标记：只有对应发起方收得到对方的相关槽位数组
+    const oppLinked = oppP && oppP.linkedSlots ? new Set(Array.from(oppP.linkedSlots)) : new Set();
+    const oppCharmed = oppP && oppP.charmedSlots ? new Set(Array.from(oppP.charmedSlots)) : new Set();
+    const oppKilled = oppP && oppP.killedSlots ? new Set(Array.from(oppP.killedSlots)) : new Set();
+    const oppPoisoned = oppP && oppP.poisonedSlots ? new Set(Array.from(oppP.poisonedSlots)) : new Set();
+    const oppIdol = oppP && oppP.idolSlots ? new Set(Array.from(oppP.idolSlots)) : new Set();
+    for (let i = 0; i < oppCount; i++) {
+      const open = oppOpen[i];
+      const el = open
+        ? cardEl(open, { num: i + 1, linkMark: oppLinked.has(i), dataset: { idx: i } })
+        : (() => {
+            const back = document.createElement("div");
+            back.className = "card-back";
+            back.innerHTML = `<span class="back-num">${i + 1}</span>`;
+            if (oppLinked.has(i)) {
+              back.insertAdjacentHTML("beforeend", '<span class="cupid-mark">丘</span>');
+            }
+            if (oppCharmed.has(i)) {
+              back.insertAdjacentHTML("beforeend", '<span class="charm-mark">♥</span>');
+            }
+            if (oppKilled.has(i)) {
+              back.insertAdjacentHTML("beforeend", '<span class="kill-mark">杀</span>');
+            }
+            if (oppPoisoned.has(i)) {
+              back.insertAdjacentHTML("beforeend", '<span class="poison-mark">杀毒</span>');
+            }
+            if (oppIdol.has(i)) {
+              back.insertAdjacentHTML("beforeend", '<span class="idol-mark">榜</span>');
+            }
+            back.dataset.idx = i;
+            return back;
+          })();
+      if (targeting && (pa.zone === "opponentHand" || pa.zone === "anyHand")) {
+        el.classList.add("selectable");
+        el.title = "点击选择这张牌";
+      }
+      oppHand.appendChild(el);
+    }
+    if (oppCount === 0) oppHand.innerHTML = '<div class="empty">对方已无手牌</div>';
+  });
+
+  // ---------- 行动区（双方共用）：我的牌正面在前，对方的牌在后 ----------
+  const oppPlayer = state.players.get(oppId);
+  const oppPlayCount = oppPlayer ? oppPlayer.playCount || 0 : 0;
+  const oppRevealed = oppPlayer && oppPlayer.revealedName
+    ? { name: oppPlayer.revealedName, type: oppPlayer.revealedType }
+    : null;
+  const myPlay = $("my-play");
+  // ★ 行动区里自己刚打出的牌：技能还没发动（正在等我选目标）→ 点它 = 取消这次发动
+  const canCancelPlay = targeting && CANCELABLE_PENDING.has(pa.type) &&
+    me && me.play && me.play.length > 0;
+  flipRender(myPlay, () => {
+    const hasMine = me && me.play && me.play.length > 0;
+    if (hasMine) {
+      const myIdolPlay = me.idolPlaySlots ? new Set(Array.from(me.idolPlaySlots)) : new Set();
+      me.play.forEach((card, idx) => {
+        const ev = cardEl(card, { idolMark: myIdolPlay.has(idx) });
+        if (canCancelPlay) {
+          ev.classList.add("cancellable");
+          ev.addEventListener("click", () => room.send("cancelPlay", { id: card.id }));
+        }
+        myPlay.appendChild(ev);
+      });
+    }
+    if (oppRevealed) {
+      myPlay.appendChild(
+        cardEl({ id: "opp-revealed", name: oppRevealed.name, type: oppRevealed.type }, {})
+      );
+    } else {
+      const oppCharmedPlay = oppPlayer && oppPlayer.charmedPlaySlots
+        ? new Set(Array.from(oppPlayer.charmedPlaySlots)) : new Set();
+      const oppKilledPlay = oppPlayer && oppPlayer.killedPlaySlots
+        ? new Set(Array.from(oppPlayer.killedPlaySlots)) : new Set();
+      const oppPoisonedPlay = oppPlayer && oppPlayer.poisonedPlaySlots
+        ? new Set(Array.from(oppPlayer.poisonedPlaySlots)) : new Set();
+      const oppIdolPlay = oppPlayer && oppPlayer.idolPlaySlots
+        ? new Set(Array.from(oppPlayer.idolPlaySlots)) : new Set();
+      for (let i = 0; i < oppPlayCount; i++) {
+        const back = document.createElement("div");
+        back.className = "card-back";
+        if (oppCharmedPlay.has(i)) {
+          back.insertAdjacentHTML("beforeend", '<span class="charm-mark">♥</span>');
+        }
+        if (oppKilledPlay.has(i)) {
+          back.insertAdjacentHTML("beforeend", '<span class="kill-mark">杀</span>');
+        }
+        if (oppPoisonedPlay.has(i)) {
+          back.insertAdjacentHTML("beforeend", '<span class="poison-mark">杀毒</span>');
+        }
+        if (oppIdolPlay.has(i)) {
+          back.insertAdjacentHTML("beforeend", '<span class="idol-mark">榜</span>');
+        }
+        myPlay.appendChild(back);
+      }
+    }
+    if (!hasMine && oppPlayCount === 0) {
+      myPlay.innerHTML = '<div class="empty">🎬 行动区还没有牌…</div>';
+    }
+  });
+
+  // ---------- 我的手牌 ----------
+  const myHand = $("my-hand");
+  witchCardId = "";
+  witchCardReviveUsed = false;
+  witchCardPoisonUsed = false;
+  witchCardBless = 0;
+  witchCardBlessPotion = "";
+  flipRender(myHand, () => {
+    if (me && me.hand) {
+      // 丘比特「丘」标记 + 野孩子「榜」标记：只有对应发起方收得到相关槽位数组（视图控制）
+      const myLinked = me.linkedSlots ? new Set(Array.from(me.linkedSlots)) : new Set();
+      const myIdol = me.idolSlots ? new Set(Array.from(me.idolSlots)) : new Set();
+      me.hand.forEach((card, idx) => {
+        // ★ 变狼的野孩子此刻就是狼：夜里一样能出刀
+        const isWolf = card.type === "wolf" || card.turnedWolf === true;
+        // 女巫学徒技能与女巫完全一致（同样一瓶解药 + 一瓶毒药）
+        const isWitch = card.skill === "witch" || card.skill === "witchApprentice";
+        const isKnight = card.skill === "knight";
+        // ★ 大野狼（skill=greatWolf）自带一把独立狼刀：不受"本夜共用刀已用"限制
+        const isGreatWolf = card.skill === "greatWolf";
+        // ★ 盗贼：夜里可【点牌主动发动】，与对手随机换一张手牌
+        const isThief = card.skill === "thief" && !card.thiefUsed;
+        const isSeer = card.skill === "seer";
+        // ★ 丘比特：己方 / 对方的手牌都能连，只要两边加起来还有 2 张可选
+        const oppHandCount = oppId && state.players.get(oppId) ? state.players.get(oppId).handCount : 0;
+        // ★ 丘比特：己方 / 对方的手牌都能连，只要两边加起来还有 2 张可选；整局只能连一次
+        const isCupid = card.skill === "cupid" && (!card.usedOnce || card.blessCharges > 0) &&
+          me && me.hand.length - 1 + oppHandCount >= 2;
+        const isNecro = card.skill === "necromancer" && me && me.graveyard.length > 0;
+        const isWhiteWolf = card.skill === "whiteWolfKing";
+        const isGuard = card.skill === "guard" && me && me.hand.length >= 2;
+        const isMerchant = card.skill === "miracleMerchant" && !card.usedOnce &&
+          me && me.hand.some((c, i) => i !== idx && c.type === "god");
+        const isWildChild = card.skill === "wildChild" && !card.usedOnce;
+        // ★ 狼美人：一夜只有一次行动 —— 魅惑 或 杀人（共用刀）
+        //   两个都用完了（魅惑过 + 刀已被用掉）→ 这张牌本回合不能再动
+        const isBeauty = card.skill === "wolfBeauty" &&
+          (!card.charmUsedTonight || !state.wolfKnifeUsed);
+        // ★ 本回合这张牌还能不能行动：
+        //   轮到我 + 这张牌本回合还没行动过 +
+        //   黑夜：女巫【还有没用过的药】/ 狼人可出刀【且本夜狼刀尚未用过】/ 盗贼未发动 / 预言家
+        //   白天：只有白狼王可以自爆
+        //   狼人 / 狼王共用一把刀：一旦任意一张狼牌动过刀，本夜其它狼牌锁定。
+        //   女巫只有一瓶解药 + 一瓶毒药：两瓶都用完后这张牌就彻底不可用。
+        const potionsLeft =
+          !card.witchReviveUsed || !card.witchPoisonUsed || card.blessCharges > 0;
+        const usable =
+          (canAct && night && !card.acted &&
+            ((isWitch && potionsLeft) ||
+              (isWolf && (isGreatWolf || !state.wolfKnifeUsed)) ||
+              isThief || isSeer || isCupid || isNecro ||
+              isGuard || isMerchant || isWildChild || isBeauty)) ||
+          (canAct && !night && !card.acted && (isWhiteWolf || isKnight));
+        // 旧版曾在此处理"女巫解药选手牌"，现已改为在墓地复活（见下方墓地渲染与点选）
+        // 奇迹商人强化：只有神职牌可被选中高亮
+        const handTargetOk = pa.type !== "merchantBless" || card.type === "god";
+        const selectable =
+          targeting && (pa.zone === "hand" || pa.zone === "anyHand") && handTargetOk;
+        if (isWitch && night && canAct && !card.acted && potionsLeft) {
+          witchCardId = card.id;
+          witchCardReviveUsed = card.witchReviveUsed;
+          witchCardPoisonUsed = card.witchPoisonUsed;
+          witchCardBless = card.blessCharges || 0;
+          witchCardBlessPotion = card.blessPotion || "";
+        }
+
+        const el = cardEl(card, {
+          disabled: !usable && !selectable,
+          selectable,
+          num: idx + 1,
+          linkMark: myLinked.has(idx),
+          idolMark: myIdol.has(idx),
+          dataset: { id: card.id, idx: idx },
+        });
+        if (usable) el.classList.add("playable");
+        if (card.acted) {
+          el.classList.add("acted");
+          el.insertAdjacentHTML(
+            "beforeend",
+            '<span class="acted-tag">已行动</span>'
+          );
+        } else if (isWolf && !isGreatWolf && !isBeauty && night && state.wolfKnifeUsed) {
+          // 本夜狼刀已用过：其余狼牌（含狼王）置灰并打上「刀已用」角标
+          // ★ 例外一：大野狼有独立的一把刀，不受影响
+          // ★ 例外二：狼美人还能魅惑，只是二选一里的「杀人」会灰掉，整张牌不置灰
+          // ★ 例外三：白天这一条完全不生效 —— wolfKnifeUsed 是"上一夜"留下的值，
+          //   白天狼人本来就不能出刀，白狼王却还要用【主动自爆】，不能把它一起灰掉
+          el.classList.add("acted");
+          el.insertAdjacentHTML(
+            "beforeend",
+            '<span class="acted-tag">🔪 本夜刀已用</span>'
+          );
+        } else if (isWitch && !potionsLeft) {
+          // 女巫两瓶药都用完：这张牌永远不能再行动
+          el.classList.add("acted");
+          el.insertAdjacentHTML(
+            "beforeend",
+            '<span class="acted-tag">🧪 药剂已空</span>'
+          );
+        }
+        myHand.appendChild(el);
+      });
+    }
+    if (!me || !me.hand || me.hand.length === 0) myHand.innerHTML = '<div class="empty">手牌已空</div>';
+  });
+  $("my-hand-info").innerHTML = me
+    ? `共 ${me.handCount} 张 · 🎬 行动区 ${me.playCount || 0} 张 · ❤️ 生命 ${aliveCount(state, mySessionId)}`
+    : "";
+
+  // ---------- 墓地（★ 私有：只显示【自己】死掉的牌） ----------
+  const grave = $("graveyard");
+  const myGrave = me ? me.graveyard : [];
+  // 女巫解药：从自己墓地选一张复活时，墓地牌变为可点选
+  const graveTargeting = pa.type !== "" && pa.actor === mySessionId && pa.zone === "graveyard";
+  flipRender(grave, () => {
+    myGrave.forEach((card, idx) => {
+      grave.appendChild(
+        cardEl(card, {
+          grave: true,
+          selectable: graveTargeting,
+          dataset: { id: card.id, idx: idx },
+        })
+      );
+    });
+    if (myGrave.length === 0) grave.innerHTML = '<div class="empty">🪦 墓地空空如也…</div>';
+  });
+
+  // ---------- 按钮 ----------
+  // 流放按钮：白天 + 我行动 + 满足条件（本夜死过牌 且 手牌【票权】≥3）
+  // 票权：除长老外所有身份各 1 票，长老 2 票（狼人 / 神职 / 平民 等都计 1 票）
+  let exileEligible = false;
+  let myVotes = 0;
+  if (me && state.phase === "day" && canAct) {
+    me.hand.forEach((c) => {
+      myVotes += c.skill === "elder" ? 2 : 1;
+    });
+    exileEligible = !!me.lostThisNight && myVotes >= 3;
+  }
+  const exileBtn = $("btn-exile");
+  if (exileEligible) {
+    exileBtn.style.display = "inline-block";
+    exileBtn.disabled = false;
+    exileBtn.textContent = "⚖️ 流放";
+  } else if (state.phase === "day" && canAct) {
+    exileBtn.style.display = "inline-block";
+    exileBtn.disabled = true;
+    exileBtn.textContent = `⚖️ 流放（${myVotes}/3 票）`;
+  } else {
+    exileBtn.style.display = "none";
+  }
+
+  $("btn-ready").disabled = !canAct;
+  $("btn-skip").style.display = targeting ? "inline-block" : "none";
+}
+
+// ============================================================
+//  阶段倒计时（每 250ms 刷新，最后 5s 变红闪烁）
+// ============================================================
+function tickCountdown() {
+  const el = $("countdown");
+  if (!room || !room.state) return;
+  const dl = room.state.deadline;
+  if (!dl) {
+    phaseEndsAt = 0;
+    el.textContent = room.state.winner !== "" ? "🏁 已结束" : "⏳ 结算中…";
+    el.classList.remove("urgent");
+    return;
+  }
+  const end = phaseEndsAt || dl;
+  const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  el.textContent = `⏱ ${left}s`;
+  el.classList.toggle("urgent", left <= 5);
+}
+setInterval(tickCountdown, 250);
+
+// ============================================================
+//  状态变化入口
+// ============================================================
+function onStateChange(state) {
+  // 首帧保护：players 可能还没同步
+  if (!state || !state.players || !state.players.get(mySessionId)) return;
+
+  const snap = snapshot(state);
+  if (prevSnapshot && JSON.stringify(prevSnapshot) === JSON.stringify(snap)) return;
+  diffAndLog(prevSnapshot, snap, state);
+  prevSnapshot = snap;
+  render(state);
+
+  // 回合交替弹窗：只在【回合真正换到我】（turnOwner 从对方/空 → 我）时触发。
+  // 自己回合内多次行动（出牌/技能结算）不改变 turnOwner，因此不会重复弹窗。
+  const myTurnActive =
+    state.winner === "" &&
+    state.turnOwner === mySessionId &&
+    !state.turnActed &&
+    state.pendingAction.type === "";
+  if (myTurnActive && prevTurnOwner !== mySessionId) {
+    showTurnAlert(state.phase);
+    log("👉 本方回合！请行动（出牌 / 技能 / 流放 / 结束回合）");
+  } else if (!myTurnActive && prevMyTurnActive) {
+    clearTurnAlert();
+  }
+  prevMyTurnActive = myTurnActive;
+  prevTurnOwner = state.winner === "" ? state.turnOwner : "";
+}
+
+// ============================================================
+//  连接 & 消息
+// ============================================================
+async function main() {
+  room = await client.joinOrCreate("my_room");
+  mySessionId = room.sessionId;
+  log(`✅ 已加入房间 ${room.roomId}（我方 sessionId：${mySessionId}）`);
+  log("⏳ 等待第 2 位玩家加入…（两人到齐会自动开局）");
+
+  // 5 秒后仍未开局 → 给出排查提示（多半是旧页面/僵尸连接占了房间座位）
+  setTimeout(() => {
+    if (room && room.state && room.state.round === 0) {
+      log(
+        "⚠️ 仍未开局：当前房间人数 " + room.state.players.size + "/2。\n" +
+        "   请关闭所有旧页面后重新打开（Ctrl+F5 强制刷新）；" +
+        "若仍不行，重启服务器可清空残留房间。"
+      );
+    }
+  }, 5000);
+
+  room.onStateChange(onStateChange);
+
+  room.onMessage("gameStart", () =>
+    log("🎮 游戏开始！回合顺序：黑夜 → 天亮结算 → 白天（双方轮流行动）")
+  );
+  room.onMessage("turnStart", (m) => {
+    phaseEndsAt = Date.now() + m.duration;
+    const sec = Math.round(m.duration / 1000);
+    const role = m.owner === mySessionId ? "你" : "对方";
+    const seqName = ["P1 黑夜", "P2 黑夜", "P1 白天", "P2 白天"][m.seq] || "";
+    log(`🔄 第 ${m.round} 轮 · ${seqName} · 轮到 ${role} 行动（限时 ${sec}s）`);
+    tickCountdown();
+  });
+
+  // yourTurn：后端在轮到某方时单独发送。弹窗已由 onStateChange 的状态上升沿可靠触发，
+  // 这里仅作日志确认（避免与状态驱动弹窗重复）。
+  room.onMessage("yourTurn", (m) => {
+    log("👉 本方回合！（" + (m.phase === "night" ? "黑夜" : "白天") + "）");
+  });
+  room.onMessage("playRejected", (m) => log("⛔ 操作被拒绝：" + m.reason));
+  // 服务端定向提示（如盗贼强制换牌）：只进折叠的事件日志，不占画面
+  room.onMessage("hint", (m) => log(m.text));
+  room.onMessage("seerResult", (m) => {
+    const text = `🔍 对方 #${m.index + 1} 是「${CARD_ICON[m.type] || "❖"} ${m.name}」`;
+    log(text);
+    showToast(text);
+  });
+  room.onMessage("deathSkill", (m) => {
+    log(m.text);
+    showToast(m.text);
+  });
+  room.onMessage("wildChildTurned", (m) => {
+    log(m.text);
+    showToast(m.text);
+  });
+  room.onMessage("duelResult", (m) => {
+    const text = m.survived
+      ? `⚔️ 决斗：对方 #${m.index + 1} 是「${CARD_ICON[m.type] || "❖"} ${m.name}」，狼倒下`
+      : `⚔️ 决斗：对方 #${m.index + 1} 不是狼人，骑士倒下`;
+    log(text);
+    showToast(text);
+  });
+  room.onMessage("foolRevealed", (m) => {
+    const who = m.owner === mySessionId ? "你的白痴" : "对方白痴";
+    const text = `🃏 ${who}翻牌，放逐无效`;
+    log(text);
+    showToast(text);
+  });
+  room.onMessage("actionRequired", (m) => {
+    log("👉 " + m.description);
+  });
+  room.onMessage("cardReturned", (m) => {
+    // 牌回到手牌后，让它闪一下，提示"没被消耗，还能再用"
+    window.setTimeout(() => {
+      const el = document.querySelector(`.card[data-id="${m.cardId}"]`);
+      if (el) {
+        el.classList.remove("card-return");
+        void el.offsetWidth;
+        el.classList.add("card-return");
+      }
+    }, 60);
+  });
+  room.onMessage("gameOver", (m) => {
+    clearTurnAlert();
+    log(`🏆 游戏结束：${m.winner === mySessionId ? "你赢了" : "你输了"}${m.reason ? "（" + m.reason + "）" : ""}`);
+  });
+  room.onError((code, msg) => log("❌ 连接错误 code=" + code + " " + (msg || "")));
+  room.onLeave((code) => log("❌ 已离开房间 code=" + code));
+}
+
+// ============================================================
+//  交互（事件委托 + 飞牌动画）
+// ============================================================
+
+/** 我此刻是否可以在本阶段行动 */
+function canActNow() {
+  const s = room.state;
+  return (
+    s.winner === "" && s.turnOwner === mySessionId && !s.turnActed &&
+    s.pendingAction.type === ""
+  );
+}
+
+// 我的手牌点击：女巫用药 / 出牌（飞向行动区）
+// ★ 注：解药已从"救被锁定的手牌"改为"复活自己墓地的牌"，选目标在墓地区进行（见 graveyard 监听）
+$("my-hand").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-idx]");
+  if (!el) return;
+  const pa = room.state.pendingAction;
+  const myHandNow = room.state.players.get(mySessionId).hand;
+  let idx = Number(el.dataset.idx);
+  // 兜底：DOM 与 state 短暂不同步时，按卡牌 id 重新定位（否则会点到别的牌上）
+  if (!myHandNow[idx] || myHandNow[idx].id !== el.dataset.id) {
+    const j = myHandNow.findIndex((c) => c.id === el.dataset.id);
+    if (j >= 0) idx = j;
+  }
+
+  // 选自己手牌作为目标（丘比特连接 / 守卫 / 奇迹商人强化等）
+  if (pa.type !== "" && pa.actor === mySessionId &&
+      (pa.zone === "hand" || pa.zone === "anyHand")) {
+    // 奇迹商人强化：只有神职牌是合法目标
+    if (pa.type === "merchantBless") {
+      const card = myHandNow[idx];
+      if (!card || card.type !== "god") {
+        log(`⛔「${card ? card.name : "这张牌"}」不是神职，奇迹商人只能强化神职牌`);
+        return;
+      }
+    }
+    room.send("chooseTarget", { index: idx, side: "self" });
+    log(`🎯 你选择了自己的手牌 #${idx + 1}`);
+    return;
+  }
+
+  // 点女巫牌 → 打开技能选择（解药 / 毒药），而不是出牌
+  if (
+    canActNow() && room.state.phase === "night" &&
+    el.dataset.id === witchCardId && witchCardId !== ""
+  ) {
+    // ★ 每瓶药终身限一次：已用过的那瓶禁用，除非还有奇迹商人给的那一瓶
+    const btnSave = $("modal-save");
+    const btnPoison = $("modal-poison");
+    btnSave.disabled =
+      witchCardReviveUsed && !(witchCardBless > 0 && witchCardBlessPotion === "revive");
+    btnPoison.disabled =
+      witchCardPoisonUsed && !(witchCardBless > 0 && witchCardBlessPotion === "poison");
+    btnSave.textContent = "💊 解药";
+    btnPoison.textContent = "☠️ 毒药";
+    $("modal-cancel").style.display = "";
+    $("modal-title").textContent = "女巫的药剂";
+    $("modal-sub").textContent = "今夜，你要用哪一瓶？";
+    $("modal-mask").classList.add("show");
+    return;
+  }
+
+  if (canActNow() && !el.classList.contains("disabled")) {
+    const card = room.state.players.get(mySessionId).hand[idx];
+    if (card) {
+      // 盗贼同样先【打出到行动区】，再选对手一张手牌交换（与狼/神职一致）
+      const isWolfFly = card.type === "wolf" || card.turnedWolf === true;
+      flyCard(el, isWolfFly ? "#ff3b4e" : card.type === "god" ? "#f5c542" : "#2ecc71",
+        `${CARD_ICON[card.type]} ${card.name}`, "my-play");
+      room.send("playCard", { id: el.dataset.id });
+      log(`🎬 你打出了 ${card.name}（#${idx + 1}）→ 行动区`);
+      clearTurnAlert();
+    }
+  }
+});
+
+// 对方手牌背面点击：目标选择模式（狼刀 / 开枪 / 带人 / 毒人）
+$("opp-hand").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-idx]");
+  if (!el) return;
+  const pa = room.state.pendingAction;
+  if (pa.type !== "" && pa.actor === mySessionId &&
+      (pa.zone === "opponentHand" || pa.zone === "anyHand")) {
+    flyCard(el, "#f5c542", "🎯 选择", "graveyard");
+    room.send("chooseTarget", { index: Number(el.dataset.idx), side: "opp" });
+    const action = TARGET_ACTION[pa.type] || "选择";
+    log(`🎯 你对对方手牌 #${Number(el.dataset.idx) + 1} 发动了${action}`);
+  }
+});
+
+// 自己的墓地点击：女巫解药选择要复活的牌
+$("graveyard").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-idx]");
+  if (!el) return;
+  const pa = room.state.pendingAction;
+  if (pa.type !== "" && pa.actor === mySessionId && pa.zone === "graveyard") {
+    flyCard(el, "#9b6bff", "💊 复活", "my-hand");
+    room.send("chooseTarget", { index: Number(el.dataset.idx) });
+    log(`💊 你复活了墓地的第 ${Number(el.dataset.idx) + 1} 张牌`);
+  }
+});
+
+// 行动完毕 / 跳过本阶段（双方都点或倒计时结束 → 进入下一阶段）
+$("btn-ready").addEventListener("click", () => {
+  room.send("ready");
+  log("✅ 你结束了本阶段行动");
+  clearTurnAlert();
+});
+
+// 跳过技能
+$("btn-skip").addEventListener("click", () => {
+  room.send("chooseTarget", { index: -1 });
+  log("⏭️ 你跳过了该技能");
+});
+
+// 流放：白天满足条件时，发起流放（随后在对方手牌中选目标）
+$("btn-exile").addEventListener("click", () => {
+  if ($("btn-exile").disabled) return;
+  room.send("exile");
+  log("⚖️ 你发起了流放，请选择对方一张手牌");
+  clearTurnAlert();
+});
+
+// 女巫技能模态框（入口：点击手牌中的女巫牌）
+$("modal-cancel").addEventListener("click", () => {
+  const pa = room && room.state ? room.state.pendingAction : null;
+  if (pa && pa.type === "wolfBeautyChoice") room.send("beautyAction", { mode: "cancel" });
+  $("modal-mask").classList.remove("show");
+});
+$("modal-save").addEventListener("click", () => {
+  const pa = room && room.state ? room.state.pendingAction : null;
+  if (pa && pa.type === "witchBless") room.send("blessPotion", { mode: "revive" });
+  else if (pa && pa.type === "wolfBeautyChoice") room.send("beautyAction", { mode: "kill" });
+  else if (witchCardId) room.send("useSkill", { cardId: witchCardId, mode: "revive" });
+  $("modal-mask").classList.remove("show");
+  clearTurnAlert();
+});
+$("modal-poison").addEventListener("click", () => {
+  const pa = room && room.state ? room.state.pendingAction : null;
+  if (pa && pa.type === "witchBless") room.send("blessPotion", { mode: "poison" });
+  else if (pa && pa.type === "wolfBeautyChoice") room.send("beautyAction", { mode: "charm" });
+  else if (witchCardId) room.send("useSkill", { cardId: witchCardId, mode: "poison" });
+  $("modal-mask").classList.remove("show");
+  clearTurnAlert();
+});
+
+main().catch((err) => {
+  log("❌ 连接失败：" + err.message);
+  console.error(err);
+});
+</script>
 </body>
 </html>
